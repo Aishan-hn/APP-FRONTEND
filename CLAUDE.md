@@ -11,7 +11,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 There is no linter, test runner or TypeScript. `npm run build` is the only automated check.
 
-Setup: copy `.env.example` to `.env` and set `WEBHOOK_URL`. Node 22.9 or later is required, for `--env-file-if-exists`.
+Setup: copy `.env.example` to `.env` and set `WEBHOOK_URL`. Node 22.9 or later is required, for `--env-file-if-exists`. `README.md` is the user-facing doc for setup, deployment and troubleshooting; keep it in sync when commands, env vars or limits change.
+
+- **Testing the proxy:** don't hit the real n8n webhook. Point `WEBHOOK_URL` at a throwaway local HTTP server that returns image bytes, then run `server.js` against it.
+- **OneDrive problem:** the project lives in a OneDrive-synced folder, so Vite's dependency re-optimization can fail with `EPERM ... rename node_modules\.vite\deps_temp_*`. Fix it by deleting `node_modules/.vite` and restarting the dev server.
+- **Restarting the dev server:** on Windows, stopping the `npm run dev` shell can leave the `vite.js` node process orphaned and still holding the port. Find it by port (`netstat -ano`) before restarting.
 
 ## What this app is
 
