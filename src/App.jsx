@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import UploadCard from './components/UploadCard.jsx'
 import ResultCard from './components/ResultCard.jsx'
 
-const WEBHOOK_URL = import.meta.env.VITE_WEBHOOK_URL
+// Same-origin proxy (server/fuse-handler.js); the real webhook URL stays server-side
+const API_URL = '/api/fuse'
+const REQUEST_TIMEOUT_MS = 130_000
+const MAX_FILE_BYTES = 10 * 1024 * 1024
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
@@ -45,6 +48,10 @@ export default function App() {
   const handleFile = (slot, file) => {
     if (!isAllowedFile(file)) {
       setErrorMessage(`"${file.name}" is not supported. Please upload a .jpg, .jpeg, .png or .webp image.`)
+      return
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      setErrorMessage(`"${file.name}" is too large. Each image must be 10 MB or less.`)
       return
     }
     const url = URL.createObjectURL(file)
@@ -93,21 +100,28 @@ export default function App() {
       formData.append('image2', image2)
 
       // No Content-Type header: the browser sets multipart/form-data with the boundary
-      const response = await fetch(WEBHOOK_URL, { method: 'POST', body: formData })
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      })
 
       if (!response.ok) {
-        const text = await response.text().catch(() => '')
-        throw new Error(`Request failed (${response.status})${text ? `: ${text.slice(0, 200)}` : ''}`)
+        const data = await response.json().catch(() => null)
+        throw new Error(data?.error || `Request failed (${response.status}).`)
       }
 
       const blob = await response.blob()
+      if (!blob.type.startsWith('image/')) throw new Error('The server did not return an image.')
       if (resultImage) URL.revokeObjectURL(resultImage)
       setResultImage(URL.createObjectURL(blob))
     } catch (err) {
       const message =
-        err instanceof TypeError
-          ? 'Could not reach the server. Check your connection, or make sure the webhook allows requests from this origin (CORS).'
-          : err.message || 'Something went wrong.'
+        err.name === 'TimeoutError'
+          ? 'The request took too long. Please try again.'
+          : err instanceof TypeError
+            ? 'Could not reach the server. Check your connection and try again.'
+            : err.message || 'Something went wrong.'
       setErrorMessage(message)
     } finally {
       setIsLoading(false)
