@@ -8,8 +8,11 @@ export default defineConfig(({ mode }) => {
   // Load every .env variable for server-side use only. Only VITE_* variables reach
   // the browser bundle, so secrets must never use that prefix.
   const env = loadEnv(mode, process.cwd(), '')
-  // Report names only, never values: this message ends up in hosted build logs
-  const leaked = Object.keys(env).filter((key) => key.startsWith('VITE_') && /WEBHOOK|SECRET|TOKEN|KEY|AUTH/i.test(key))
+  // Report names only, never values: this message ends up in hosted build logs.
+  // VITE_VERCEL_* are Vercel's own system variables (e.g. ..._COMMIT_AUTHOR_NAME), not secrets.
+  const leaked = Object.keys(env).filter(
+    (key) => key.startsWith('VITE_') && !key.startsWith('VITE_VERCEL_') && /WEBHOOK|SECRET|TOKEN|KEY|AUTH/i.test(key),
+  )
   if (leaked.length) {
     throw new Error(
       `Secrets must not use the VITE_ prefix; it would bundle them into the client. Remove or rename: ${leaked.join(', ')}. Use WEBHOOK_URL instead.`,
