@@ -67,7 +67,13 @@ The production server also sends security headers (Content Security Policy, fram
 
 ### Vercel
 
-Vercel's static hosting serves `dist/` but doesn't run `server.js`, so `/api/fuse` won't exist and uploads will fail. Use one of the Node hosts above, or add a Vercel Function for `/api/fuse` that wraps `createFuseHandler` from `server/fuse-handler.js`.
+Vercel doesn't run `server.js`. Instead, it serves `dist/` statically and runs the proxy as a Vercel Function (`api/fuse.js`). `vercel.json` sets the build, the function's timeout and the security headers. Import the repo into Vercel and set the environment variables; no other configuration is needed.
+
+Limits that differ from `npm start`:
+
+- **Upload size: about 4.5 MB per request in total, across both images.** Vercel rejects larger request bodies before the function runs, and the browser shows "Request failed (413)." The 10 MB-per-image limit only applies on a Node host.
+- **Rate limiting is per function instance.** Vercel can run several instances at once, so a client may get more than 10 requests per minute. `TRUST_PROXY` is always on in the function, because Vercel sets `X-Forwarded-For` itself.
+- **Timeout:** `maxDuration` is 150 s. On the Hobby plan without Fluid compute the cap is lower (60 s), so slow workflows can time out.
 
 When setting environment variables in Vercel (Project → Settings → Environment Variables):
 

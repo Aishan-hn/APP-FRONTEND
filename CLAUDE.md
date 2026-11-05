@@ -30,7 +30,8 @@ A React 19 + Vite + Tailwind CSS v4 single-page app with a small Node proxy. The
 - `server/fuse-handler.js` contains the proxy logic as a plain Node `(req, res)` handler created by `createFuseHandler(env)`. It is mounted in two places:
   - `vite.config.js`, in both the dev and preview servers (through a plugin that uses `loadEnv(mode, cwd, '')`)
   - `server.js`, the production server, which also serves `dist/` as static files
-  - Change proxy behaviour in the handler module, not in those two files.
+  - `api/fuse.js`, the Vercel Function (Vercel doesn't run `server.js`). It forces `TRUST_PROXY=true`, because Vercel sets `X-Forwarded-For` itself. Vercel caps request bodies at about 4.5 MB, below the handler's limits.
+  - Change proxy behaviour in the handler module, not in those three files.
 - What the handler does:
   - limits each request body to about 20 MB and each file to 10 MB
   - parses the multipart upload with the built-in `Request#formData()`
@@ -41,6 +42,7 @@ A React 19 + Vite + Tailwind CSS v4 single-page app with a small Node proxy. The
   - checks that the response is an image by its magic bytes
   - never forwards upstream error bodies to the browser; errors come back as JSON `{ error }`
 - `server/security-headers.js` holds the CSP and other hardening headers. They are applied in `server.js` and `vite preview`, but not in dev, because HMR needs inline scripts.
+  - `vercel.json` repeats the same headers for Vercel, which can't import JS for static responses. Keep the two identical.
   - The CSP allows only `'self'` plus `blob:`/`data:` images. Any new external script, font or API must be added there, or it will be blocked.
 - `src/App.jsx` owns all client state and logic. The two cards in `src/components/` are presentational and receive everything through props.
   - State: `image1`, `image2`, `preview1`, `preview2`, `isLoading`, `resultImage`, `errorMessage`.
