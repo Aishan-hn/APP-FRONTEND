@@ -8,8 +8,12 @@ export default defineConfig(({ mode }) => {
   // Load every .env variable for server-side use only. Only VITE_* variables reach
   // the browser bundle, so secrets must never use that prefix.
   const env = loadEnv(mode, process.cwd(), '')
-  if (Object.keys(env).some((key) => key.startsWith('VITE_') && /WEBHOOK|SECRET|TOKEN|KEY|AUTH/i.test(key))) {
-    throw new Error('Secrets must not use the VITE_ prefix; it would bundle them into the client. Use WEBHOOK_URL instead.')
+  // Report names only, never values: this message ends up in hosted build logs
+  const leaked = Object.keys(env).filter((key) => key.startsWith('VITE_') && /WEBHOOK|SECRET|TOKEN|KEY|AUTH/i.test(key))
+  if (leaked.length) {
+    throw new Error(
+      `Secrets must not use the VITE_ prefix; it would bundle them into the client. Remove or rename: ${leaked.join(', ')}. Use WEBHOOK_URL instead.`,
+    )
   }
 
   const handleFuse = createFuseHandler(env)
