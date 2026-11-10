@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import UploadCard from './components/UploadCard.jsx'
 import ResultCard from './components/ResultCard.jsx'
+import AuthScreen from './components/AuthScreen.jsx'
+import { supabase } from './lib/supabase.js'
 
 // Same-origin proxy (server/fuse-handler.js); the real webhook URL stays server-side
 const API_URL = '/api/fuse'
@@ -28,6 +30,8 @@ function Chip({ active, children }) {
 }
 
 export default function App() {
+  const [session, setSession] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
   const [image1, setImage1] = useState(null)
   const [image2, setImage2] = useState(null)
   const [preview1, setPreview1] = useState(null)
@@ -44,6 +48,16 @@ export default function App() {
     () => () => Object.values(urlsRef.current).forEach((url) => url && URL.revokeObjectURL(url)),
     [],
   )
+
+  // Also picks up the session from an email confirmation link (?code=...)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      setAuthReady(true)
+    })
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    return () => data.subscription.unsubscribe()
+  }, [])
 
   const handleFile = (slot, file) => {
     if (!isAllowedFile(file)) {
@@ -87,6 +101,11 @@ export default function App() {
     setErrorMessage(null)
   }
 
+  const handleSignOut = async () => {
+    handleReset()
+    await supabase.auth.signOut()
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!image1 || !image2) return
@@ -102,10 +121,12 @@ export default function App() {
       // No Content-Type header: the browser sets multipart/form-data with the boundary
       const response = await fetch(API_URL, {
         method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
         body: formData,
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       })
 
+      if (response.status === 401) throw new Error('Your session expired. Please sign in again.')
       if (!response.ok) {
         const data = await response.json().catch(() => null)
         throw new Error(data?.error || `Request failed (${response.status}).`)
@@ -128,6 +149,10 @@ export default function App() {
     }
   }
 
+  if (!authReady) return <div className="min-h-screen bg-white" />
+  if (!session) return <AuthScreen />
+
+  const displayName = session.user.user_metadata?.full_name || session.user.email
   const uploadedCount = (image1 ? 1 : 0) + (image2 ? 1 : 0)
   const canSubmit = Boolean(image1 && image2) && !isLoading
 
@@ -146,6 +171,17 @@ export default function App() {
             Image Fusion
           </h1>
           <span className="hidden text-[10px] uppercase tracking-[0.14em] sm:block">JPG | PNG | WEBP</span>
+        </div>
+        <div className="mt-2 flex items-center justify-center gap-3 text-[10px] uppercase tracking-[0.14em] sm:justify-end">
+          <span className="max-w-[220px] truncate text-ink/70">{displayName}</span>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={isLoading}
+            className="underline underline-offset-2 hover:text-ink/70 disabled:opacity-50"
+          >
+            Sign out
+          </button>
         </div>
       </header>
 

@@ -11,9 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 There is no linter, test runner or TypeScript. `npm run build` is the only automated check.
 
-Setup: copy `.env.example` to `.env` and set `WEBHOOK_URL`. Node 22.9 or later is required, for `--env-file-if-exists`. `README.md` is the user-facing doc for setup, deployment and troubleshooting; keep it in sync when commands, env vars or limits change.
+Setup: copy `.env.example` to `.env` and set `WEBHOOK_URL`, `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Node 22.9 or later is required, for `--env-file-if-exists`. `README.md` is the user-facing doc for setup, deployment and troubleshooting; keep it in sync when commands, env vars or limits change.
 
-- **Testing the proxy:** don't hit the real n8n webhook. Point `WEBHOOK_URL` at a throwaway local HTTP server that returns image bytes, then run `server.js` against it.
+- **Testing the proxy:** don't hit the real n8n webhook. Point `WEBHOOK_URL` at a throwaway local HTTP server that returns image bytes, then run `server.js` against it. Requests now need `Authorization: Bearer <access token of a signed-in Supabase user>`, or they get a 401.
 - **OneDrive problem:** the project lives in a OneDrive-synced folder, so Vite's dependency re-optimization can fail with `EPERM ... rename node_modules\.vite\deps_temp_*`. Fix it by deleting `node_modules/.vite` and restarting the dev server.
 - **Restarting the dev server:** on Windows, stopping the `npm run dev` shell can leave the `vite.js` node process orphaned and still holding the port. Find it by port (`netstat -ano`) before restarting.
 
@@ -27,29 +27,37 @@ A React 19 + Vite + Tailwind CSS v4 single-page app with a small Node proxy. The
   - The browser only ever calls `/api/fuse`.
   - `WEBHOOK_URL`, plus the optional `WEBHOOK_AUTH_HEADER` / `WEBHOOK_AUTH_VALUE` for n8n Header Auth, are read from `.env` by the server only.
   - Never give secrets a `VITE_` prefix: Vite inlines those into the client bundle. `vite.config.js` throws an error if a secret-looking `VITE_*` variable is set.
+  - The one exception is `VITE_SUPABASE_PUBLISHABLE_KEY`, which is listed by name in `PUBLIC_KEYS`, because a publishable key is public by design. Never allow a Supabase secret or `service_role` key.
 - `server/fuse-handler.js` contains the proxy logic as a plain Node `(req, res)` handler created by `createFuseHandler(env)`. It is mounted in two places:
   - `vite.config.js`, in both the dev and preview servers (through a plugin that uses `loadEnv(mode, cwd, '')`)
   - `server.js`, the production server, which also serves `dist/` as static files
   - `api/fuse.js`, the Vercel Function (Vercel doesn't run `server.js`). It forces `TRUST_PROXY=true`, because Vercel sets `X-Forwarded-For` itself. Vercel caps request bodies at about 4.5 MB, below the handler's limits.
   - Change proxy behaviour in the handler module, not in those three files.
+- **Auth (Supabase, project `srjtwpvoytjlbezdmchv`):**
+  - `src/lib/supabase.js` is the browser client (PKCE). `App.jsx` holds `session` / `authReady` from `getSession` + `onAuthStateChange`, and renders `src/components/AuthScreen.jsx` when signed out. `AuthScreen` keeps its own form state and calls `signUp` (name goes in `options.data.full_name`) or `signInWithPassword`.
+  - Email confirmation is on, so `signUp` returns no session until the user clicks the link.
+  - `public.profiles` (RLS, own row only) is filled by the `handle_new_user` trigger on `auth.users`.
+  - The handler also reads `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` and verifies the Bearer token with `auth.getClaims`. It requires `role === 'authenticated'`, because the anon key is itself a valid JWT.
 - What the handler does:
   - limits each request body to about 20 MB and each file to 10 MB
   - parses the multipart upload with the built-in `Request#formData()`
   - checks each file's real type from its magic bytes (JPEG, PNG or WebP only)
   - rebuilds the form with sanitized filenames before forwarding it
+  - after the rate-limit check and before reading the body, returns 401 unless the request has a valid signed-in user's token
   - rate-limits to 10 requests per minute per IP, held in memory (`TRUST_PROXY=true` makes it use `X-Forwarded-For`)
   - applies a 120 s timeout to the upstream call
   - checks that the response is an image by its magic bytes
   - never forwards upstream error bodies to the browser; errors come back as JSON `{ error }`
 - `server/security-headers.js` holds the CSP and other hardening headers. They are applied in `server.js` and `vite preview`, but not in dev, because HMR needs inline scripts.
   - `vercel.json` repeats the same headers for Vercel, which can't import JS for static responses. Keep the two identical.
-  - The CSP allows only `'self'` plus `blob:`/`data:` images. Any new external script, font or API must be added there, or it will be blocked.
+  - The CSP allows only `'self'` plus `blob:`/`data:` images, and the Supabase project origin in `connect-src`. Any new external script, font or API must be added there, or it will be blocked.
 - `src/App.jsx` owns all client state and logic. The two cards in `src/components/` are presentational and receive everything through props.
-  - State: `image1`, `image2`, `preview1`, `preview2`, `isLoading`, `resultImage`, `errorMessage`.
+  - State: `session`, `authReady`, `image1`, `image2`, `preview1`, `preview2`, `isLoading`, `resultImage`, `errorMessage`.
   - `UploadCard` handles file picking and drag-and-drop, then calls `onSelect(file)`. Validation happens in `App.handleFile`, not in the card.
 - **Client request** (in `handleSubmit`):
   - `POST /api/fuse` with `FormData` fields `image1` and `image2`.
   - Never set `Content-Type` manually; the browser must add the multipart boundary.
+  - It sends `Authorization: Bearer ${session.access_token}`.
   - A successful response is a **binary image, not JSON**. It is read with `response.blob()` and displayed through `URL.createObjectURL`.
 - **Allowed uploads:** `.jpg`, `.jpeg`, `.png` and `.webp`, up to 10 MB each. These rules are repeated in three places that must stay in sync:
   - the client checks in `App.jsx` (`isAllowedFile` and `MAX_FILE_BYTES`)

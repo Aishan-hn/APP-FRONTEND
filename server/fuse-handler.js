@@ -1,6 +1,7 @@
 // Server-side proxy for the image fusion webhook. The webhook URL (and optional
 // auth header) only ever live on the server; the browser talks to /api/fuse.
 import { Buffer } from 'node:buffer'
+import { createClient } from '@supabase/supabase-js'
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024
 const MAX_BODY_BYTES = 2 * MAX_FILE_BYTES + 64 * 1024
@@ -59,6 +60,15 @@ export function createFuseHandler(env) {
   const authHeaderValue = env.WEBHOOK_AUTH_VALUE
   const trustProxy = env.TRUST_PROXY === 'true'
 
+  // Public project URL and publishable key, shared with the browser bundle. Only used
+  // to verify the caller's access token, never to act on their behalf.
+  const supabase =
+    env.VITE_SUPABASE_URL && env.VITE_SUPABASE_PUBLISHABLE_KEY
+      ? createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_PUBLISHABLE_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+        })
+      : null
+
   const hits = new Map()
 
   function isRateLimited(ip) {
@@ -83,10 +93,23 @@ export function createFuseHandler(env) {
     return req.socket.remoteAddress || 'unknown'
   }
 
+  // Verifies the Supabase access token (signature against the project's JWKS, plus
+  // expiry). The anon key is itself a JWT, so require a signed-in user's role.
+  async function isSignedIn(req) {
+    const match = /^Bearer (\S+)$/.exec(req.headers.authorization || '')
+    if (!match) return false
+    try {
+      const { data, error } = await supabase.auth.getClaims(match[1])
+      return !error && data?.claims?.role === 'authenticated' && !data.claims.is_anonymous
+    } catch {
+      return false
+    }
+  }
+
   return async function handleFuse(req, res) {
     if (req.method !== 'POST') return sendError(res, 405, 'Method not allowed.', { Allow: 'POST' })
-    if (!webhookUrl) {
-      console.error('[fuse] WEBHOOK_URL is not set')
+    if (!webhookUrl || !supabase) {
+      console.error('[fuse] WEBHOOK_URL, VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY is not set')
       return sendError(res, 500, 'The server is not configured.')
     }
 
@@ -94,6 +117,9 @@ export function createFuseHandler(env) {
     if (!contentType.startsWith('multipart/form-data')) return sendError(res, 415, 'Expected a multipart upload.')
     if (isRateLimited(clientIp(req))) {
       return sendError(res, 429, 'Too many requests. Please wait a minute and try again.', { 'Retry-After': '60' })
+    }
+    if (!(await isSignedIn(req))) {
+      return sendError(res, 401, 'Please sign in to continue.', { 'WWW-Authenticate': 'Bearer' })
     }
 
     try {

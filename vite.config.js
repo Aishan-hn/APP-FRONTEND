@@ -10,8 +10,15 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   // Report names only, never values: this message ends up in hosted build logs.
   // VITE_VERCEL_* are Vercel's own system variables (e.g. ..._COMMIT_AUTHOR_NAME), not secrets.
+  // A Supabase publishable key is public by design (RLS protects the data); a
+  // secret or service_role key must never be exposed, so only this one name is allowed.
+  const PUBLIC_KEYS = ['VITE_SUPABASE_PUBLISHABLE_KEY']
   const leaked = Object.keys(env).filter(
-    (key) => key.startsWith('VITE_') && !key.startsWith('VITE_VERCEL_') && /WEBHOOK|SECRET|TOKEN|KEY|AUTH/i.test(key),
+    (key) =>
+      key.startsWith('VITE_') &&
+      !key.startsWith('VITE_VERCEL_') &&
+      !PUBLIC_KEYS.includes(key) &&
+      /WEBHOOK|SECRET|TOKEN|KEY|AUTH/i.test(key),
   )
   if (leaked.length) {
     throw new Error(

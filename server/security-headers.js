@@ -7,7 +7,7 @@ export const SECURITY_HEADERS = {
     "style-src 'self'",
     "img-src 'self' blob: data:",
     "font-src 'self'",
-    "connect-src 'self'",
+    "connect-src 'self' https://srjtwpvoytjlbezdmchv.supabase.co",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
