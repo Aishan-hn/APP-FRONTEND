@@ -35,7 +35,7 @@ Then edit `.env`:
 ### Supabase
 
 - **Database:** a `public.profiles` table (`id`, `full_name`, `created_at`) with Row Level Security. Users can only read and update their own row. A trigger on `auth.users` creates the row at sign-up, copying the name from the user's metadata.
-- **Auth → URL Configuration:** set **Site URL** to your production domain, and add `http://localhost:5173` and `http://localhost:3000` under **Redirect URLs**. The confirmation email links back to the page the user signed up from.
+- **Auth → URL Configuration:** set **Site URL** to your production domain, and add `http://localhost:5173` and `http://localhost:3000` under **Redirect URLs**. The confirmation and password reset emails link back to the site the user requested them from.
 - **Auth → Providers → Email:** keep **Confirm email** on. Set the minimum password length to 8 to match the sign-up form.
 - **Before launch:** set up custom SMTP (Auth → SMTP Settings). Supabase's built-in mailer only sends a few emails per hour.
 
@@ -99,7 +99,7 @@ When setting environment variables in Vercel (Project → Settings → Environme
 - **`Error: Secrets must not use the VITE_ prefix`** (during `vite build`, for example on Vercel): a `VITE_*` variable with `WEBHOOK`, `SECRET`, `TOKEN`, `KEY` or `AUTH` in its name is set. If `.env` is clean, look in your host's environment variables. Delete it, or rename it without the prefix (e.g. `VITE_WEBHOOK_URL` → `WEBHOOK_URL`). If a secret was ever deployed with the `VITE_` prefix in a successful build, it was public: rotate it.
 - **"The server is not configured."**: `WEBHOOK_URL`, `VITE_SUPABASE_URL` or `VITE_SUPABASE_PUBLISHABLE_KEY` is missing.
 - **"Please sign in to continue." / "Your session expired."**: the proxy rejected the access token. Sign out and in again.
-- **Confirmation link opens the wrong site or shows an error**: add that origin to Supabase's Redirect URLs (see Setup → Supabase).
+- **Confirmation or password reset link opens the wrong site or shows an error**: add that origin to Supabase's Redirect URLs (see Setup → Supabase). Open a reset link in the same browser you requested it from, and use only the newest email; requesting again invalidates older links.
 - **Supabase requests blocked by CSP**: if you change Supabase projects, update the origin in `connect-src` in both `server/security-headers.js` and `vercel.json`.
 - **"The image service returned an error."**: n8n responded with an error status. Check the workflow's execution log in n8n.
 - **"The image service did not return a supported image."**: the workflow's response isn't JPEG, PNG or WebP. Make sure the Respond to Webhook node returns the binary image.

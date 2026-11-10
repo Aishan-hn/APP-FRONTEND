@@ -32,6 +32,8 @@ function Chip({ active, children }) {
 export default function App() {
   const [session, setSession] = useState(null)
   const [authReady, setAuthReady] = useState(false)
+  // True after arriving from a password reset email, until a new password is saved
+  const [isRecovering, setIsRecovering] = useState(false)
   const [image1, setImage1] = useState(null)
   const [image2, setImage2] = useState(null)
   const [preview1, setPreview1] = useState(null)
@@ -49,13 +51,17 @@ export default function App() {
     [],
   )
 
-  // Also picks up the session from an email confirmation link (?code=...)
+  // Also picks up the session from an email confirmation or password reset link (?code=...)
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session)
       setAuthReady(true)
     })
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      setSession(nextSession)
+      if (event === 'PASSWORD_RECOVERY') setIsRecovering(true)
+      if (event === 'SIGNED_OUT') setIsRecovering(false)
+    })
     return () => data.subscription.unsubscribe()
   }, [])
 
@@ -150,7 +156,15 @@ export default function App() {
   }
 
   if (!authReady) return <div className="min-h-screen bg-white" />
-  if (!session) return <AuthScreen />
+  if (!session || isRecovering) {
+    return (
+      <AuthScreen
+        key={isRecovering ? 'reset' : 'auth'}
+        recovery={isRecovering}
+        onRecoveryDone={() => setIsRecovering(false)}
+      />
+    )
+  }
 
   const displayName = session.user.user_metadata?.full_name || session.user.email
   const uploadedCount = (image1 ? 1 : 0) + (image2 ? 1 : 0)

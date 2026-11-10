@@ -36,6 +36,7 @@ A React 19 + Vite + Tailwind CSS v4 single-page app with a small Node proxy. The
 - **Auth (Supabase, project `srjtwpvoytjlbezdmchv`):**
   - `src/lib/supabase.js` is the browser client (PKCE). `App.jsx` holds `session` / `authReady` from `getSession` + `onAuthStateChange`, and renders `src/components/AuthScreen.jsx` when signed out. `AuthScreen` keeps its own form state and calls `signUp` (name goes in `options.data.full_name`) or `signInWithPassword`.
   - Email confirmation is on, so `signUp` returns no session until the user clicks the link.
+  - Forgot password: `resetPasswordForEmail` with `redirectTo: window.location.origin`. The link signs the user in and fires `PASSWORD_RECOVERY`, which sets `isRecovering` in App. App then keeps rendering `AuthScreen` in `reset` mode until `updateUser({ password })` succeeds. With PKCE, the link only works in the browser that requested it.
   - `public.profiles` (RLS, own row only) is filled by the `handle_new_user` trigger on `auth.users`.
   - The handler also reads `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` and verifies the Bearer token with `auth.getClaims`. It requires `role === 'authenticated'`, because the anon key is itself a valid JWT.
 - What the handler does:
@@ -52,7 +53,7 @@ A React 19 + Vite + Tailwind CSS v4 single-page app with a small Node proxy. The
   - `vercel.json` repeats the same headers for Vercel, which can't import JS for static responses. Keep the two identical.
   - The CSP allows only `'self'` plus `blob:`/`data:` images, and the Supabase project origin in `connect-src`. Any new external script, font or API must be added there, or it will be blocked.
 - `src/App.jsx` owns all client state and logic. The two cards in `src/components/` are presentational and receive everything through props.
-  - State: `session`, `authReady`, `image1`, `image2`, `preview1`, `preview2`, `isLoading`, `resultImage`, `errorMessage`.
+  - State: `session`, `authReady`, `isRecovering`, `image1`, `image2`, `preview1`, `preview2`, `isLoading`, `resultImage`, `errorMessage`.
   - `UploadCard` handles file picking and drag-and-drop, then calls `onSelect(file)`. Validation happens in `App.handleFile`, not in the card.
 - **Client request** (in `handleSubmit`):
   - `POST /api/fuse` with `FormData` fields `image1` and `image2`.
