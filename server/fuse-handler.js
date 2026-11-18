@@ -94,16 +94,29 @@ export function createFuseHandler(env) {
   }
 
   // Verifies the Supabase access token (signature against the project's JWKS, plus
-  // expiry). The anon key is itself a JWT, so require a signed-in user's role.
-  async function isSignedIn(req) {
+  // expiry), then checks for an active subscription. The anon key is itself a JWT, so
+  // require a signed-in user's role.
+  async function authorize(req) {
     const match = /^Bearer (\S+)$/.exec(req.headers.authorization || '')
-    if (!match) return false
+    if (!match) return 'unauthenticated'
     try {
       const { data, error } = await supabase.auth.getClaims(match[1])
-      return !error && data?.claims?.role === 'authenticated' && !data.claims.is_anonymous
+      if (error || data?.claims?.role !== 'authenticated' || data.claims.is_anonymous) return 'unauthenticated'
     } catch {
-      return false
+      return 'unauthenticated'
     }
+
+    // Query as the user so RLS and auth.uid() apply
+    const userClient = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_PUBLISHABLE_KEY, {
+      global: { headers: { Authorization: `Bearer ${match[1]}` } },
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    })
+    const { data: active, error } = await userClient.rpc('has_active_subscription')
+    if (error) {
+      console.error('[fuse] subscription check failed:', error.message)
+      return 'unavailable'
+    }
+    return active ? 'ok' : 'unpaid'
   }
 
   return async function handleFuse(req, res) {
@@ -118,9 +131,12 @@ export function createFuseHandler(env) {
     if (isRateLimited(clientIp(req))) {
       return sendError(res, 429, 'Too many requests. Please wait a minute and try again.', { 'Retry-After': '60' })
     }
-    if (!(await isSignedIn(req))) {
+    const access = await authorize(req)
+    if (access === 'unauthenticated') {
       return sendError(res, 401, 'Please sign in to continue.', { 'WWW-Authenticate': 'Bearer' })
     }
+    if (access === 'unpaid') return sendError(res, 402, 'An active subscription is required.')
+    if (access === 'unavailable') return sendError(res, 503, 'Could not check your subscription. Please try again.')
 
     try {
       const body = await readBody(req, MAX_BODY_BYTES)

@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { createFuseHandler } from './server/fuse-handler.js'
+import { createStripeWebhookHandler } from './server/stripe-webhook-handler.js'
 import { applySecurityHeaders } from './server/security-headers.js'
 
 export default defineConfig(({ mode }) => {
@@ -12,7 +13,7 @@ export default defineConfig(({ mode }) => {
   // VITE_VERCEL_* are Vercel's own system variables (e.g. ..._COMMIT_AUTHOR_NAME), not secrets.
   // A Supabase publishable key is public by design (RLS protects the data); a
   // secret or service_role key must never be exposed, so only this one name is allowed.
-  const PUBLIC_KEYS = ['VITE_SUPABASE_PUBLISHABLE_KEY']
+  const PUBLIC_KEYS = ['VITE_SUPABASE_PUBLISHABLE_KEY', 'VITE_STRIPE_PAYMENT_LINK', 'VITE_STRIPE_PORTAL_URL']
   const leaked = Object.keys(env).filter(
     (key) =>
       key.startsWith('VITE_') &&
@@ -27,11 +28,13 @@ export default defineConfig(({ mode }) => {
   }
 
   const handleFuse = createFuseHandler(env)
+  const handleStripeWebhook = createStripeWebhookHandler(env)
 
   const fuseApi = {
     name: 'fuse-api',
     configureServer(server) {
       server.middlewares.use('/api/fuse', handleFuse)
+      server.middlewares.use('/api/stripe-webhook', handleStripeWebhook)
     },
     configurePreviewServer(server) {
       server.middlewares.use((req, res, next) => {
@@ -39,6 +42,7 @@ export default defineConfig(({ mode }) => {
         next()
       })
       server.middlewares.use('/api/fuse', handleFuse)
+      server.middlewares.use('/api/stripe-webhook', handleStripeWebhook)
     },
   }
 

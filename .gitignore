@@ -5,3 +5,6 @@ dist/
 !.env.example
 
 .vercel
+
+# Ignore MCP config file
+.mcp.json

@@ -2,12 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import UploadCard from './components/UploadCard.jsx'
 import ResultCard from './components/ResultCard.jsx'
 import AuthScreen from './components/AuthScreen.jsx'
+import PaywallScreen from './components/PaywallScreen.jsx'
 import { supabase } from './lib/supabase.js'
 
 // Same-origin proxy (server/fuse-handler.js); the real webhook URL stays server-side
 const API_URL = '/api/fuse'
 const REQUEST_TIMEOUT_MS = 130_000
 const MAX_FILE_BYTES = 10 * 1024 * 1024
+
+// Public Stripe URLs: the subscription payment link and the customer portal login
+const PAYMENT_LINK = import.meta.env.VITE_STRIPE_PAYMENT_LINK
+const PORTAL_URL = import.meta.env.VITE_STRIPE_PORTAL_URL
+// After checkout, poll while the Stripe webhook records the subscription
+const CHECKOUT_POLL_MS = 2_000
+const CHECKOUT_POLL_ATTEMPTS = 15
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']
@@ -34,6 +42,9 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false)
   // True after arriving from a password reset email, until a new password is saved
   const [isRecovering, setIsRecovering] = useState(false)
+  // null while checking; false shows the paywall
+  const [hasAccess, setHasAccess] = useState(null)
+  const [isCheckingAccess, setIsCheckingAccess] = useState(false)
   const [image1, setImage1] = useState(null)
   const [image2, setImage2] = useState(null)
   const [preview1, setPreview1] = useState(null)
@@ -64,6 +75,62 @@ export default function App() {
     })
     return () => data.subscription.unsubscribe()
   }, [])
+
+  const fetchAccess = async () => {
+    const { data, error } = await supabase.rpc('has_active_subscription')
+    if (error) throw error
+    return data === true
+  }
+
+  const refreshAccess = async () => {
+    setIsCheckingAccess(true)
+    try {
+      setHasAccess(await fetchAccess())
+    } catch {
+      setHasAccess(false)
+    } finally {
+      setIsCheckingAccess(false)
+    }
+  }
+
+  // Check the subscription whenever a different user signs in. Returning from Stripe
+  // (?checkout=success), keep polling until the webhook has recorded the payment.
+  const userId = session?.user.id
+  useEffect(() => {
+    if (!userId) {
+      setHasAccess(null)
+      return
+    }
+    let cancelled = false
+    const params = new URLSearchParams(window.location.search)
+    const fromCheckout = params.get('checkout') === 'success'
+
+    ;(async () => {
+      setIsCheckingAccess(true)
+      let active = false
+      for (let attempt = 0; attempt < (fromCheckout ? CHECKOUT_POLL_ATTEMPTS : 1); attempt++) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, CHECKOUT_POLL_MS))
+        if (cancelled) return
+        try {
+          active = await fetchAccess()
+        } catch {
+          active = false
+        }
+        if (active) break
+      }
+      if (cancelled) return
+      if (fromCheckout) {
+        params.delete('checkout')
+        const query = params.toString()
+        window.history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : ''))
+      }
+      setHasAccess(active)
+      setIsCheckingAccess(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [userId])
 
   const handleFile = (slot, file) => {
     if (!isAllowedFile(file)) {
@@ -133,6 +200,10 @@ export default function App() {
       })
 
       if (response.status === 401) throw new Error('Your session expired. Please sign in again.')
+      if (response.status === 402) {
+        setHasAccess(false)
+        return
+      }
       if (!response.ok) {
         const data = await response.json().catch(() => null)
         throw new Error(data?.error || `Request failed (${response.status}).`)
@@ -166,6 +237,22 @@ export default function App() {
     )
   }
 
+  if (hasAccess !== true) {
+    const checkoutUrl = `${PAYMENT_LINK}?${new URLSearchParams({
+      client_reference_id: session.user.id,
+      prefilled_email: session.user.email,
+    })}`
+    return (
+      <PaywallScreen
+        email={session.user.email}
+        checkoutUrl={checkoutUrl}
+        isChecking={hasAccess === null || isCheckingAccess}
+        onRefresh={refreshAccess}
+        onSignOut={handleSignOut}
+      />
+    )
+  }
+
   const displayName = session.user.user_metadata?.full_name || session.user.email
   const uploadedCount = (image1 ? 1 : 0) + (image2 ? 1 : 0)
   const canSubmit = Boolean(image1 && image2) && !isLoading
@@ -188,6 +275,14 @@ export default function App() {
         </div>
         <div className="mt-2 flex items-center justify-center gap-3 text-[10px] uppercase tracking-[0.14em] sm:justify-end">
           <span className="max-w-[220px] truncate text-ink/70">{displayName}</span>
+          {PORTAL_URL && (
+            <a
+              href={`${PORTAL_URL}?${new URLSearchParams({ prefilled_email: session.user.email })}`}
+              className="underline underline-offset-2 hover:text-ink/70"
+            >
+              Manage subscription
+            </a>
+          )}
           <button
             type="button"
             onClick={handleSignOut}

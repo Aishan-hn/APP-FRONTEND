@@ -1,10 +1,12 @@
-// Production server: serves the built SPA from dist/ and the /api/fuse proxy.
+// Production server: serves the built SPA from dist/, the /api/fuse proxy and the
+// /api/stripe-webhook endpoint.
 // Run with `npm start` after `npm run build`.
 import http from 'node:http'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createFuseHandler } from './server/fuse-handler.js'
+import { createStripeWebhookHandler } from './server/stripe-webhook-handler.js'
 import { applySecurityHeaders } from './server/security-headers.js'
 
 const DIST_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist')
@@ -25,6 +27,7 @@ const MIME_TYPES = {
 }
 
 const handleFuse = createFuseHandler(process.env)
+const handleStripeWebhook = createStripeWebhookHandler(process.env)
 
 async function serveStatic(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -64,6 +67,7 @@ const server = http.createServer((req, res) => {
   applySecurityHeaders(res)
   const { pathname } = new URL(req.url, 'http://localhost')
   if (pathname === '/api/fuse') return handleFuse(req, res)
+  if (pathname === '/api/stripe-webhook') return handleStripeWebhook(req, res)
   serveStatic(req, res).catch((err) => {
     console.error('[static]', err)
     res.writeHead(500)
