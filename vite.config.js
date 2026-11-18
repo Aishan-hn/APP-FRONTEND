@@ -5,7 +5,7 @@ import { createFuseHandler } from './server/fuse-handler.js'
 import { createStripeWebhookHandler } from './server/stripe-webhook-handler.js'
 import { applySecurityHeaders } from './server/security-headers.js'
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   // Load every .env variable for server-side use only. Only VITE_* variables reach
   // the browser bundle, so secrets must never use that prefix.
   const env = loadEnv(mode, process.cwd(), '')
@@ -24,6 +24,15 @@ export default defineConfig(({ mode }) => {
   if (leaked.length) {
     throw new Error(
       `Secrets must not use the VITE_ prefix; it would bundle them into the client. Remove or rename: ${leaked.join(', ')}. Use WEBHOOK_URL instead.`,
+    )
+  }
+
+  // VITE_* values are inlined at build time. Without the payment link, the Subscribe
+  // button becomes the relative URL "undefined?..." and 404s, so fail the build instead.
+  // The portal link stays optional: the app hides "Manage subscription" without it.
+  if (command === 'build' && !/^https:\/\/\S+$/.test(env.VITE_STRIPE_PAYMENT_LINK ?? '')) {
+    throw new Error(
+      'VITE_STRIPE_PAYMENT_LINK must be set to the Stripe payment link URL (https://buy.stripe.com/...) before building. On Vercel, add it under Settings -> Environment Variables, then redeploy.',
     )
   }
 
